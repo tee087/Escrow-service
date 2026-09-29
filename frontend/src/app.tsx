@@ -121,7 +121,7 @@ function App() {
   const [view, setView] = useState('Home');
   const [error, setError] = useState('');
   const loadProfile = async () => { const result = await api('/api/profile'); setProfile(result); };
-  useEffect(() => { const initData = telegramInitData(); if (initData) { api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData }) }).then(loadProfile).catch(() => loadProfile().catch(() => undefined)); } else { loadProfile().catch(() => undefined); } api('/api/listings').then(setListings).catch(reason => setError(reason.message)); }, []);
+  useEffect(() => { (window as any).Telegram?.WebApp?.ready(); const initData = telegramInitData(); if (initData) { api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData }) }).then(loadProfile).catch(() => loadProfile().catch(() => undefined)); } else { loadProfile().catch(() => undefined); } api('/api/listings').then(setListings).catch(reason => setError(reason.message)); }, []);
   if (!profile) return <Auth onAuthenticated={loadProfile} />;
   if (view === 'Deals') return <PrivateDeals api={api} profile={profile} onBack={() => setView('Home')} />;
   if (view === 'Catalog') return <OfficialCatalog onNavigate={setView} />;
