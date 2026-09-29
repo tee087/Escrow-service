@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
+import './form-enhancements';
 import './styles.css';
 const apiUrl = import.meta.env.VITE_API_URL || '';
 const api = async (path:string, options:RequestInit={}) => { const response=await fetch(`${apiUrl}${path}`,{credentials:'include',headers:{'content-type':'application/json',...(options.headers||{})},...options}); const data=await response.json(); if(!response.ok) throw new Error(data.error||'Request failed.'); return data; };

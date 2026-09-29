@@ -46,7 +46,16 @@ function verifyInitData(initData: string) {
   return values.get('user');
 }
 const registration = z.object({ nickname: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_-]+$/), password: z.string().min(10).max(128), pin: z.string().regex(/^\d{4}$/), acceptedTerms: z.literal(true) });
-app.post('/api/auth/register', async (request, reply) => { const data = registration.parse(request.body); const codes = recoveryCodes(); const user = await db.user.create({ data: { nickname: data.nickname, passwordHash: await argon2.hash(data.password, { type: argon2.argon2id }), pinHash: await argon2.hash(data.pin), recoveryCodes: { create: await Promise.all(codes.map(async code => ({ codeHash: await argon2.hash(code, { type: argon2.argon2id }) }))) } } }); await createSession(user.id, reply); return { recoveryCodes: codes }; });
+app.post('/api/auth/register', async (request, reply) => {
+  const data = registration.parse(request.body);
+  if (await db.user.findUnique({ where: { nickname: data.nickname }, select: { id: true } })) {
+    return reply.code(409).send({ error: 'That nickname is already in use. Please choose another.' });
+  }
+  const codes = recoveryCodes();
+  const user = await db.user.create({ data: { nickname: data.nickname, passwordHash: await argon2.hash(data.password, { type: argon2.argon2id }), pinHash: await argon2.hash(data.pin), recoveryCodes: { create: await Promise.all(codes.map(async code => ({ codeHash: await argon2.hash(code, { type: argon2.argon2id }) }))) } } });
+  await createSession(user.id, reply);
+  return { recoveryCodes: codes };
+});
 app.post('/api/auth/login', async (request, reply) => { const data = z.object({ nickname: z.string(), password: z.string() }).parse(request.body); const user = await db.user.findUnique({ where: { nickname: data.nickname } }); if (!user || !(await argon2.verify(user.passwordHash, data.password))) return reply.code(401).send({ error: 'Invalid nickname or password.' }); await createSession(user.id, reply); return { ok: true }; });
 app.post('/api/auth/telegram', async (request, reply) => { const { initData } = z.object({ initData: z.string() }).parse(request.body); const rawUser = verifyInitData(initData); if (!rawUser) return reply.code(401).send({ error: 'Invalid Telegram authentication data.' }); const telegram = z.object({ id: z.number(), username: z.string().optional() }).parse(JSON.parse(rawUser)); const linked = await db.telegramAccount.findUnique({ where: { telegramId: BigInt(telegram.id) }, include: { user: true } }); if (!linked) return reply.code(404).send({ error: 'No CL-Service account is linked to this Telegram account.' }); await createSession(linked.user.id, reply); return { ok: true }; });
 app.post('/api/auth/logout', { preHandler: authenticate }, async (request, reply) => { const token = request.cookies.session!; await db.session.deleteMany({ where: { tokenHash: hashToken(token) } }); reply.clearCookie('session', { path: '/' }); return { ok: true }; });
