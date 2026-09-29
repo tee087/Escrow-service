@@ -21,6 +21,10 @@ CL-Service is an English-language Telegram Mini App for legitimate escrow market
 
 The included payment endpoint intentionally returns `Payment provider is not configured.` No client can mark a deal funded. Before production, implement a provider adapter that creates payments, validates signed provider webhooks, verifies the provider-side status, and atomically transitions `ACCEPTED` deals to `FUNDED`.
 
+## Official escrow administration
+
+Set `ADMIN_TELEGRAM_ID` to the numeric Telegram ID of the official administrator before registering that Telegram account. Only that verified account receives the `SUPER_ADMIN` role and can release a delivered or disputed deal through the administrator endpoint. Buyers and sellers cannot release funds themselves. A lawful payment provider and any required escrow/payment licensing are required before accepting real customer funds.
+
 ## Production checklist
 
 ## Vercel + Render + Neon deployment

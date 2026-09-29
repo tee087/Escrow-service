@@ -12,6 +12,10 @@ enum Role {
   SUPPORT
   SUPER_ADMIN
 }
+enum MarketplaceRole {
+  BUYER
+  SELLER
+}
 
 enum DealStatus {
   PENDING
@@ -44,6 +48,7 @@ model User {
   passwordHash String
   pinHash String
   role Role @default(USER)
+  marketplaceRole MarketplaceRole @default(BUYER)
   createdAt DateTime @default(now())
   telegram TelegramAccount?
   sessions Session[]

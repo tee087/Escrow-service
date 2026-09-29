@@ -82,7 +82,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
       }
       if (form.get('password') !== form.get('confirm')) throw new Error('Passwords do not match.');
       if (form.get('pin') !== form.get('confirmPin')) throw new Error('PIN codes do not match.');
-      const result = await api('/api/auth/register', { method: 'POST', body: JSON.stringify({ nickname: form.get('nickname'), password: form.get('password'), pin: form.get('pin'), acceptedTerms: form.get('terms') === 'on', initData: telegramInitData() || undefined }) });
+      const result = await api('/api/auth/register', { method: 'POST', body: JSON.stringify({ nickname: form.get('nickname'), password: form.get('password'), pin: form.get('pin'), marketplaceRole: form.get('marketplaceRole') || 'BUYER', acceptedTerms: form.get('terms') === 'on', initData: telegramInitData() || undefined }) });
       setCodes(result.recoveryCodes);
     } catch (reason) {
       setError((reason as Error).message);
