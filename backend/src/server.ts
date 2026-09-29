@@ -45,7 +45,18 @@ function verifyInitData(initData: string) {
   const authDate = Number(values.get('auth_date')); if (!authDate || Date.now() / 1000 - authDate > 86400) return null;
   return values.get('user');
 }
-const registration = z.object({ nickname: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_-]+$/), password: z.string().min(10).max(128), pin: z.string().regex(/^\d{4}$/), acceptedTerms: z.literal(true) });
+const registration = z.object({
+  nickname: z.string().min(3, 'Nickname must contain at least 3 characters.').max(32, 'Nickname cannot exceed 32 characters.').regex(/^[a-zA-Z0-9_-]+$/, 'Nickname can use letters, numbers, underscores, and hyphens only.'),
+  password: z.string().min(10, 'Password must contain at least 10 characters.').max(128, 'Password cannot exceed 128 characters.').regex(/[a-z]/, 'Password must contain a lowercase letter.').regex(/[A-Z]/, 'Password must contain an uppercase letter.').regex(/\d/, 'Password must contain a number.'),
+  pin: z.string().regex(/^\d{4}$/, 'PIN must contain exactly 4 digits.'),
+  acceptedTerms: z.literal(true, { errorMap: () => ({ message: 'You must agree to the Terms of Service.' }) })
+});
+app.get('/api/auth/nickname-availability', async request => {
+  const query = z.object({ nickname: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_-]+$/) }).safeParse(request.query);
+  if (!query.success) return { available: false, message: 'Use 3–32 letters, numbers, underscores, or hyphens.' };
+  const existing = await db.user.findUnique({ where: { nickname: query.data.nickname }, select: { id: true } });
+  return existing ? { available: false, message: 'This nickname is already in use.' } : { available: true, message: 'Nickname is available.' };
+});
 app.post('/api/auth/register', async (request, reply) => {
   const data = registration.parse(request.body);
   if (await db.user.findUnique({ where: { nickname: data.nickname }, select: { id: true } })) {
