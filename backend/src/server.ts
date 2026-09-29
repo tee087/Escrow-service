@@ -121,6 +121,57 @@ app.get('/api/community/typing', { preHandler: authenticate }, async request => 
   return { users: users.map(entry => entry.user.nickname) };
 });
 app.get('/api/notifications', { preHandler: authenticate }, request => db.notification.findMany({where:{userId:(request as AuthRequest).user.id},orderBy:{createdAt:'desc'},take:50}));
+/*
 app.post('/telegram/webhook', async (request, reply) => { const secret = request.headers['x-telegram-bot-api-secret-token']; if (!process.env.TELEGRAM_WEBHOOK_SECRET || secret !== process.env.TELEGRAM_WEBHOOK_SECRET) return reply.code(403).send({ error: 'Forbidden.' }); const update = request.body as { message?: { chat?: { id:number }; from?: { id:number }; text?:string } }; const message = update.message; if (!message?.chat?.id || !message.text) return { ok:true }; const responses:Record<string,string> = { '/help':'🛡️ <b>CL-Service Help</b>\n\nUse the Mini App to create private deal rooms, track verified escrow transactions, and contact the community.\n\n⚠️ Only the official administrator provides escrow services.', '/profile':'👤 <b>Your CL-Service Profile</b>\n\nOpen the Mini App to manage your Buyer/Seller role, Telegram profile, and private deal rooms.', '/deals':'📦 <b>Your Private Deal Rooms</b>\n\nOpen the Mini App to view deals involving you and the official escrow administrator.' }; if(message.text==='/id'&&message.from){responses['/id']=`🔐 <b>Your Telegram User ID</b>\n\n<code>${message.from.id}</code>\n\nKeep this private. It is used only to configure the official administrator account.`;} const isStart=message.text.startsWith('/start'); const registered = isStart && message.from ? await db.telegramAccount.findUnique({ where: { telegramId: BigInt(message.from.id) }, select: { id: true } }) : null; const text=isStart ? registered ? '🛡️ <b>Welcome back to CL-Service</b>\n\nYour verified marketplace account is ready.\n\n🔒 Private buyer–seller–admin deal rooms\n📦 Escrow transaction tracking\n💬 Community chat\n\nTap <b>Open Escrow</b> to continue.' : '🛡️ <b>Welcome to CL-Service</b>\n<blockquote>A global marketplace for official escrow-protected transactions.</blockquote>\n\n👤 Register as a Buyer or Seller\n🤝 Agree deal terms privately\n💳 Pay only through official escrow\n📦 Confirm delivery\n✅ Administrator releases or refunds according to the verified deal\n\n⚠️ <b>Never send funds to anyone claiming to be an escrow agent outside a verified CL-Service deal.</b>'; if (!text || !process.env.BOT_TOKEN) return { ok:true }; await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({chat_id:message.chat.id,text,parse_mode:'HTML',reply_markup:isStart?{inline_keyboard:[[{text:registered?'🛡️ Open Escrow':'✨ Open CL-Service',web_app:{url:process.env.MINI_APP_URL}}],[{text:'📖 How It Works',web_app:{url:process.env.MINI_APP_URL}}]]}:undefined}) }); return { ok:true }; });
+*/
+app.post('/telegram/webhook', async (request, reply) => {
+  const secret = request.headers['x-telegram-bot-api-secret-token'];
+  if (!process.env.TELEGRAM_WEBHOOK_SECRET || secret !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+    return reply.code(403).send({ error: 'Forbidden.' });
+  }
+
+  const update = request.body as { message?: { chat?: { id: number }; from?: { id: number }; text?: string } };
+  const message = update.message;
+  if (!message?.chat?.id || !message.text) return { ok: true };
+
+  const responses: Record<string, string> = {
+    '/help': '\u{1F6E1}\u{FE0F} <b>CL-Service Help</b>\n\nUse the Mini App to create private deal rooms, track official escrow transactions, and connect with the community.\n\n\u{26A0}\u{FE0F} Only the official administrator provides escrow services.',
+    '/profile': '\u{1F464} <b>Your CL-Service Profile</b>\n\nOpen the Mini App to manage your buyer or seller profile, Telegram account, and private deal rooms.',
+    '/deals': '\u{1F4E6} <b>Your Private Deal Rooms</b>\n\nOpen the Mini App to view deals involving you and the official escrow administrator.'
+  };
+
+  if (message.text === '/id' && message.from) {
+    responses['/id'] = `\u{1F510} <b>Your Telegram User ID</b>\n\n<code>${message.from.id}</code>\n\nKeep this private. It is used only to configure the official administrator account.`;
+  }
+
+  const isStart = message.text.startsWith('/start');
+  const registered = isStart && message.from
+    ? await db.telegramAccount.findUnique({ where: { telegramId: BigInt(message.from.id) }, select: { id: true } })
+    : null;
+  const text = isStart
+    ? registered
+      ? '\u{1F6E1}\u{FE0F} <b>Welcome back to CL-Service</b>\n\nYour verified marketplace account is ready.\n\n\u{1F512} Private buyer-seller-admin deal rooms\n\u{1F4E6} Official transaction tracking\n\u{1F4AC} Community chat\n\nTap <b>Open Escrow</b> to continue.'
+      : '\u{1F6E1}\u{FE0F} <b>Welcome to CL-Service</b>\n\nA global marketplace for official escrow-protected transactions.\n\n\u{1F464} Register as a buyer or seller\n\u{1F91D} Agree deal terms privately\n\u{1F4B3} Pay only through official escrow\n\u{1F4E6} Confirm delivery\n\u{2705} Administrator releases or refunds according to the verified deal\n\n\u{26A0}\u{FE0F} <b>Never send funds to anyone claiming to be an escrow agent outside a verified CL-Service deal.</b>'
+    : responses[message.text];
+
+  const botToken = process.env.BOT_TOKEN;
+  const miniAppUrl = process.env.MINI_APP_URL;
+  if (!text || !botToken || !miniAppUrl) return { ok: true };
+
+  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: message.chat.id,
+      text,
+      parse_mode: 'HTML',
+      reply_markup: isStart
+        ? { inline_keyboard: [[{ text: registered ? '\u{1F6E1}\u{FE0F} Open Escrow' : '\u{2728} Open CL-Service', web_app: { url: miniAppUrl } }]] }
+        : undefined
+    })
+  });
+
+  return { ok: true };
+});
 app.setErrorHandler((error, _request, reply) => { if (error instanceof z.ZodError) return reply.code(400).send({ error: error.issues[0]?.message || 'Invalid request.' }); app.log.error(error); return reply.code((error as any).statusCode || 500).send({ error: 'An unexpected error occurred.' }); });
 await app.listen({ port: Number(process.env.PORT || 3000), host: '0.0.0.0' });
