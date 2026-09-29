@@ -53,6 +53,7 @@ model User {
   sales EscrowDeal[] @relation("Seller")
   notifications Notification[]
   messages Message[]
+  communityMessages CommunityMessage[]
   ratings Rating[]
 }
 model TelegramAccount {
@@ -141,6 +142,15 @@ model Message {
   sender User @relation(fields: [senderId], references: [id])
   dealId String
   deal EscrowDeal @relation(fields: [dealId], references: [id])
+}
+model CommunityMessage {
+  id String @id @default(cuid())
+  body String
+  createdAt DateTime @default(now())
+  senderId String
+  sender User @relation(fields: [senderId], references: [id])
+
+  @@index([createdAt])
 }
 model Dispute {
   id String @id @default(cuid())
