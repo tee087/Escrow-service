@@ -6,6 +6,7 @@ import './dashboard.css';
 import './navigation.css';
 import './community-chat.css';
 import { CommunityChat, NavigationDashboard } from './navigation-dashboard';
+import { PublicChat } from './public-chat';
 
 const apiUrl = import.meta.env.VITE_API_URL || '';
 
@@ -115,7 +116,7 @@ function App() {
   const loadProfile = async () => { const result = await api('/api/profile'); setProfile(result); };
   useEffect(() => { loadProfile().catch(() => undefined); api('/api/listings').then(setListings).catch(reason => setError(reason.message)); }, []);
   if (!profile) return <Auth onAuthenticated={loadProfile} />;
-  if (view === 'Chat') return <CommunityChat api={api} onNavigate={setView} />;
+  if (view === 'Chat') return <PublicChat api={api} onNavigate={setView} />;
   return <><NavigationDashboard profile={profile} listings={listings} view={view} setView={setView} api={api} logout={async () => { await api('/api/auth/logout', { method: 'POST' }); setProfile(null); }} />{error && <p className="error global-error">{error}</p>}</>;
   return <main><header><span>Menu</span><strong>CL-Service</strong><span>Alerts</span></header>{view === 'Home' && <section><h1>Welcome, {profile.nickname}</h1><p className="muted">A secure marketplace for escrow-protected transactions.</p><div className="actions"><button onClick={() => setView('Catalog')}>Browse Catalog</button><button onClick={() => setView('Deals')}>View Deals</button></div><h2>Recent listings</h2>{listings.slice(0, 3).map(listing => <article key={listing.id}><b>{listing.title}</b><p>{listing.currency} {listing.price} · {listing.seller.nickname}</p></article>)}</section>}{view === 'Catalog' && <section><h1>Catalog</h1>{listings.length ? listings.map(listing => <article key={listing.id}><b>{listing.title}</b><p>{listing.description}</p></article>) : <p>No listings found.</p>}</section>}{view === 'Deals' && <section><h1>Deals</h1><p>No active deals.</p></section>}{view === 'Profile' && <section><h1>Profile</h1><p>{profile.nickname}</p><LoadingButton loading={false} onClick={async () => { await api('/api/auth/logout', { method: 'POST' }); setProfile(null); }}>Logout</LoadingButton></section>}<nav>{['Home', 'Catalog', 'Deals', 'Profile'].map(item => <button className={view === item ? 'active' : ''} onClick={() => setView(item)} key={item}>{item}</button>)}</nav>{error && <p className="error">{error}</p>}</main>;
 }
