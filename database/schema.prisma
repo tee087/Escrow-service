@@ -124,10 +124,64 @@ model Payment {
   deal EscrowDeal @relation(fields: [dealId], references: [id])
   events PaymentEvent[]
 }
-model PaymentEvent { id String @id @default(cuid()); eventType String; payload Json; createdAt DateTime @default(now()); paymentId String; payment Payment @relation(fields:[paymentId],references:[id]) }
-model Message { id String @id @default(cuid()); body String; createdAt DateTime @default(now()); readAt DateTime?; senderId String; sender User @relation(fields:[senderId],references:[id]); dealId String; deal EscrowDeal @relation(fields:[dealId],references:[id]); @@index([dealId,createdAt]) }
-model Dispute { id String @id @default(cuid()); reason String; description String; status DisputeStatus @default(OPEN); createdAt DateTime @default(now()); dealId String @unique; deal EscrowDeal @relation(fields:[dealId],references:[id]); evidence DisputeEvidence[] }
-model DisputeEvidence { id String @id @default(cuid()); url String; createdAt DateTime @default(now()); disputeId String; dispute Dispute @relation(fields:[disputeId],references:[id],onDelete:Cascade) }
-model Notification { id String @id @default(cuid()); type String; body String; readAt DateTime?; createdAt DateTime @default(now()); userId String; user User @relation(fields:[userId],references:[id]); @@index([userId,createdAt]) }
-model Rating { id String @id @default(cuid()); score Int; comment String?; createdAt DateTime @default(now()); userId String; user User @relation(fields:[userId],references:[id]) }
-model AuditLog { id String @id @default(cuid()); actorId String?; action String; entityType String; entityId String; metadata Json?; createdAt DateTime @default(now()); @@index([entityType,entityId]) }
+model PaymentEvent {
+  id String @id @default(cuid())
+  eventType String
+  payload Json
+  createdAt DateTime @default(now())
+  paymentId String
+  payment Payment @relation(fields: [paymentId], references: [id])
+}
+model Message {
+  id String @id @default(cuid())
+  body String
+  createdAt DateTime @default(now())
+  readAt DateTime?
+  senderId String
+  sender User @relation(fields: [senderId], references: [id])
+  dealId String
+  deal EscrowDeal @relation(fields: [dealId], references: [id])
+}
+model Dispute {
+  id String @id @default(cuid())
+  reason String
+  description String
+  status DisputeStatus @default(OPEN)
+  createdAt DateTime @default(now())
+  dealId String @unique
+  deal EscrowDeal @relation(fields: [dealId], references: [id])
+  evidence DisputeEvidence[]
+}
+model DisputeEvidence {
+  id String @id @default(cuid())
+  url String
+  createdAt DateTime @default(now())
+  disputeId String
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+}
+model Notification {
+  id String @id @default(cuid())
+  type String
+  body String
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+}
+model Rating {
+  id String @id @default(cuid())
+  score Int
+  comment String?
+  createdAt DateTime @default(now())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  action String
+  entityType String
+  entityId String
+  metadata Json?
+  createdAt DateTime @default(now())
+}
