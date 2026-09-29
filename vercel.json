@@ -1,1 +1,1 @@
-{"buildCommand":"npm run build -w @cl-service/frontend","outputDirectory":"frontend/dist","framework":"vite","rewrites":[{"source":"/(.*)","destination":"/index.html"}]}
+{"buildCommand":"npm run build","outputDirectory":"dist","framework":"vite","rewrites":[{"source":"/(.*)","destination":"/index.html"}]}
