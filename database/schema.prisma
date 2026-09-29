@@ -61,6 +61,7 @@ model TelegramAccount {
   id String @id @default(cuid())
   telegramId BigInt @unique
   username String?
+  photoUrl String?
   userId String @unique
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
