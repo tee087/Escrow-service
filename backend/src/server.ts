@@ -22,7 +22,8 @@ type AuthRequest = FastifyRequest & { user: { id: string; role: Role } };
 const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 const recoveryCodes = () => Array.from({ length: 8 }, () => crypto.randomBytes(5).toString('hex').toUpperCase().match(/.{1,5}/g)!.join('-'));
 async function authenticate(request: FastifyRequest, reply: any) {
-  const token = request.cookies.session;
+  const authorization = request.headers.authorization;
+  const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : request.cookies.session;
   if (!token) return reply.code(401).send({ error: 'Authentication required.' });
   const session = await db.session.findFirst({ where: { tokenHash: hashToken(token), expiresAt: { gt: new Date() } }, select: { user: { select: { id: true, role: true } } } });
   if (!session) return reply.code(401).send({ error: 'Session expired.' });
@@ -32,6 +33,7 @@ async function createSession(userId: string, reply: any) {
   const token = crypto.randomBytes(32).toString('base64url');
   await db.session.create({ data: { userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14) } });
   reply.setCookie('session', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', path: '/', maxAge: 60 * 60 * 24 * 14 });
+  return token;
 }
 function verifyInitData(initData: string) {
   const token = process.env.BOT_TOKEN;
@@ -64,11 +66,11 @@ app.post('/api/auth/register', async (request, reply) => {
   }
   const codes = recoveryCodes();
   const user = await db.user.create({ data: { nickname: data.nickname, passwordHash: await argon2.hash(data.password, { type: argon2.argon2id }), pinHash: await argon2.hash(data.pin), recoveryCodes: { create: await Promise.all(codes.map(async code => ({ codeHash: await argon2.hash(code, { type: argon2.argon2id }) }))) } } });
-  await createSession(user.id, reply);
-  return { recoveryCodes: codes };
+  const sessionToken = await createSession(user.id, reply);
+  return { recoveryCodes: codes, sessionToken };
 });
-app.post('/api/auth/login', async (request, reply) => { const data = z.object({ nickname: z.string(), password: z.string() }).parse(request.body); const user = await db.user.findUnique({ where: { nickname: data.nickname } }); if (!user || !(await argon2.verify(user.passwordHash, data.password))) return reply.code(401).send({ error: 'Invalid nickname or password.' }); await createSession(user.id, reply); return { ok: true }; });
-app.post('/api/auth/telegram', async (request, reply) => { const { initData } = z.object({ initData: z.string() }).parse(request.body); const rawUser = verifyInitData(initData); if (!rawUser) return reply.code(401).send({ error: 'Invalid Telegram authentication data.' }); const telegram = z.object({ id: z.number(), username: z.string().optional() }).parse(JSON.parse(rawUser)); const linked = await db.telegramAccount.findUnique({ where: { telegramId: BigInt(telegram.id) }, include: { user: true } }); if (!linked) return reply.code(404).send({ error: 'No CL-Service account is linked to this Telegram account.' }); await createSession(linked.user.id, reply); return { ok: true }; });
+app.post('/api/auth/login', async (request, reply) => { const data = z.object({ nickname: z.string(), password: z.string() }).parse(request.body); const user = await db.user.findUnique({ where: { nickname: data.nickname } }); if (!user || !(await argon2.verify(user.passwordHash, data.password))) return reply.code(401).send({ error: 'Nickname or password is incorrect.' }); const sessionToken = await createSession(user.id, reply); return { ok: true, sessionToken }; });
+app.post('/api/auth/telegram', async (request, reply) => { const { initData } = z.object({ initData: z.string() }).parse(request.body); const rawUser = verifyInitData(initData); if (!rawUser) return reply.code(401).send({ error: 'Invalid Telegram authentication data.' }); const telegram = z.object({ id: z.number(), username: z.string().optional() }).parse(JSON.parse(rawUser)); const linked = await db.telegramAccount.findUnique({ where: { telegramId: BigInt(telegram.id) }, include: { user: true } }); if (!linked) return reply.code(404).send({ error: 'No CL-Service account is linked to this Telegram account.' }); const sessionToken = await createSession(linked.user.id, reply); return { ok: true, sessionToken }; });
 app.post('/api/auth/logout', { preHandler: authenticate }, async (request, reply) => { const token = request.cookies.session!; await db.session.deleteMany({ where: { tokenHash: hashToken(token) } }); reply.clearCookie('session', { path: '/' }); return { ok: true }; });
 app.post('/api/auth/recovery', async (request, reply) => { const data = z.object({ nickname: z.string(), code: z.string(), password: z.string().min(10) }).parse(request.body); const user = await db.user.findUnique({ where: { nickname: data.nickname }, include: { recoveryCodes: { where: { usedAt: null } } } }); const record = user && (await Promise.all(user.recoveryCodes.map(async item => await argon2.verify(item.codeHash, data.code) ? item : null))).find(Boolean); if (!user || !record) return reply.code(401).send({ error: 'Invalid recovery details.' }); await db.$transaction([db.user.update({ where: { id: user.id }, data: { passwordHash: await argon2.hash(data.password, { type: argon2.argon2id }) } }), db.recoveryCode.update({ where: { id: record.id }, data: { usedAt: new Date() } }), db.session.deleteMany({ where: { userId: user.id } })]); return { ok: true }; });
 app.get('/api/profile', { preHandler: authenticate }, async request => {
