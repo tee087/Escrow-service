@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import argon2 from 'argon2';
 import Fastify, { FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
+import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { PrismaClient, DealStatus, Role } from '@prisma/client';
@@ -13,6 +14,7 @@ const app = Fastify({ logger: true });
 const sessionSecret = process.env.SESSION_SECRET || '';
 if (sessionSecret.length < 32) throw new Error('SESSION_SECRET must contain at least 32 characters.');
 await app.register(cookie, { secret: sessionSecret });
+await app.register(cors, { origin: process.env.WEB_APP_ORIGIN || false, credentials: true });
 await app.register(helmet);
 await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
@@ -29,7 +31,7 @@ async function authenticate(request: FastifyRequest, reply: any) {
 async function createSession(userId: string, reply: any) {
   const token = crypto.randomBytes(32).toString('base64url');
   await db.session.create({ data: { userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14) } });
-  reply.setCookie('session', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 14 });
+  reply.setCookie('session', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', path: '/', maxAge: 60 * 60 * 24 * 14 });
 }
 function verifyInitData(initData: string) {
   const token = process.env.BOT_TOKEN;

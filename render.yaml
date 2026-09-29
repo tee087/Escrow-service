@@ -19,3 +19,5 @@ services:
         generateValue: true
       - key: MINI_APP_URL
         sync: false
+      - key: WEB_APP_ORIGIN
+        sync: false
