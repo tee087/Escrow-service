@@ -114,7 +114,7 @@ app.get('/api/listings', async request => { const query = z.object({ q: z.string
 app.post('/api/listings', { preHandler: authenticate }, async request => { const data = z.object({ title:z.string().min(3), description:z.string().min(10), category:z.string().min(2), price:z.coerce.number().positive(), currency:z.string().length(3), deliveryInfo:z.string().min(3), terms:z.string().min(3) }).parse(request.body); const category = await db.category.upsert({ where: { name: data.category }, create: { name: data.category }, update: {} }); const { category: _category, ...listing } = data; return db.listing.create({ data: { ...listing, sellerId: (request as AuthRequest).user.id, categoryId: category.id } }); });
 app.post('/api/deals', { preHandler: authenticate }, async (request, reply) => { const data = z.object({ sellerId:z.string(), item:z.string().min(3), amount:z.coerce.number().positive(), currency:z.string().length(3), terms:z.string().min(3), deadline:z.string().datetime() }).parse(request.body); const buyer=await db.user.findUniqueOrThrow({where:{id:(request as AuthRequest).user.id},select:{marketplaceRole:true}}); const seller=await db.user.findUnique({where:{id:data.sellerId},select:{marketplaceRole:true}}); if(buyer.marketplaceRole!=='BUYER') return reply.code(403).send({error:'Switch your marketplace role to Buyer before opening an escrow request.'}); if(!seller||seller.marketplaceRole!=='SELLER') return reply.code(400).send({error:'The selected member is not registered as a seller.'}); if (data.sellerId === (request as AuthRequest).user.id) return reply.code(400).send({ error: 'You cannot create a deal with yourself.' }); const deal = await db.escrowDeal.create({ data: { ...data, buyerId: (request as AuthRequest).user.id, deadline: new Date(data.deadline) } }); await db.notification.create({ data: { userId: data.sellerId, type:'ESCROW_ROOM_REQUESTED', body:`A buyer requested a private escrow room for deal ${deal.id}.` } }); return deal; });
 app.post('/api/private-deals', { preHandler: authenticate }, async (request, reply) => {
-  const data = z.object({ role: z.enum(['BUYER', 'SELLER']), description: z.string().trim().min(10, 'Describe the deal in at least 10 characters.').max(2000), amount: z.coerce.number().min(0).default(0), currency: z.string().trim().length(3).default('USD') }).parse(request.body);
+  const data = z.object({ role: z.enum(['BUYER', 'SELLER']), description: z.string().trim().min(10, 'Describe the deal in at least 10 characters.').max(2000), amount: z.coerce.number().min(0).default(0), currency: z.string().trim().min(3).max(10).default('USD') }).parse(request.body);
   const userId = (request as AuthRequest).user.id;
   const deal = await db.$transaction(async tx => {
     await tx.user.update({ where: { id: userId }, data: { marketplaceRole: data.role } });
@@ -135,10 +135,13 @@ app.post('/api/deals/:id/invite-counterpart', { preHandler: authenticate }, asyn
   const creatorIsBuyer = deal.buyerId === userId;
   const counterpart = await db.user.findUnique({ where: { nickname: data.nickname }, select: { id: true, marketplaceRole: true } });
   const requiredRole = creatorIsBuyer ? 'SELLER' : 'BUYER';
-  if (!counterpart || counterpart.marketplaceRole !== requiredRole) return reply.code(400).send({ error: `No ${requiredRole.toLowerCase()} is registered with that CL-Service username.` });
-  if (counterpart.id === userId) return reply.code(400).send({ error: 'You cannot invite yourself.' });
+  if (counterpart?.id === userId) return reply.code(400).send({ error: 'You cannot invite yourself. Enter the other participant’s CL-Service username.' });
+  if (!counterpart) return reply.code(404).send({ error: 'No CL-Service account was found with that username.' });
   if ((creatorIsBuyer && deal.sellerId) || (!creatorIsBuyer && deal.buyerId)) return reply.code(409).send({ error: 'The other participant has already been invited.' });
-  const updated = await db.escrowDeal.update({ where: { id: dealId }, data: creatorIsBuyer ? { sellerId: counterpart.id } : { buyerId: counterpart.id }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } });
+  const updated = await db.$transaction(async tx => {
+    await tx.user.update({ where: { id: counterpart.id }, data: { marketplaceRole: requiredRole } });
+    return tx.escrowDeal.update({ where: { id: dealId }, data: creatorIsBuyer ? { sellerId: counterpart.id } : { buyerId: counterpart.id }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } });
+  });
   await db.notification.create({ data: { userId: counterpart.id, type: 'PRIVATE_ROOM_INVITATION', body: `You were invited to a private escrow room by ${creatorIsBuyer ? 'a buyer' : 'a seller'}.` } });
   return updated;
 });
