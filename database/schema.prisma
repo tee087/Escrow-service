@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+enum Role {
+  USER
+  MODERATOR
+  SUPPORT
+  SUPER_ADMIN
+}
+
+enum DealStatus {
+  PENDING
+  ACCEPTED
+  FUNDED
+  IN_PROGRESS
+  DELIVERED
+  COMPLETED
+  DISPUTED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  VERIFIED
+  FAILED
+  REFUNDED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+model User {
+  id String @id @default(cuid())
+  nickname String @unique
+  passwordHash String
+  pinHash String
+  role Role @default(USER)
+  createdAt DateTime @default(now())
+  telegram TelegramAccount?
+  sessions Session[]
+  recoveryCodes RecoveryCode[]
+  listings Listing[]
+  purchases EscrowDeal[] @relation("Buyer")
+  sales EscrowDeal[] @relation("Seller")
+  notifications Notification[]
+  messages Message[]
+  ratings Rating[]
+}
+model TelegramAccount {
+  id String @id @default(cuid())
+  telegramId BigInt @unique
+  username String?
+  userId String @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model Session {
+  id String @id @default(cuid())
+  tokenHash String @unique
+  expiresAt DateTime
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model RecoveryCode {
+  id String @id @default(cuid())
+  codeHash String @unique
+  usedAt DateTime?
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model Category {
+  id String @id @default(cuid())
+  name String @unique
+  listings Listing[]
+}
+model Listing {
+  id String @id @default(cuid())
+  title String
+  description String
+  price Decimal @db.Decimal(18, 2)
+  currency String
+  deliveryInfo String
+  terms String
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  sellerId String
+  seller User @relation(fields: [sellerId], references: [id])
+  categoryId String
+  category Category @relation(fields: [categoryId], references: [id])
+}
+model EscrowDeal {
+  id String @id @default(cuid())
+  status DealStatus @default(PENDING)
+  item String
+  amount Decimal @db.Decimal(18, 2)
+  currency String
+  terms String
+  deadline DateTime
+  createdAt DateTime @default(now())
+  buyerId String
+  sellerId String
+  buyer User @relation("Buyer", fields: [buyerId], references: [id])
+  seller User @relation("Seller", fields: [sellerId], references: [id])
+  payments Payment[]
+  messages Message[]
+  dispute Dispute?
+}
+model Payment {
+  id String @id @default(cuid())
+  provider String
+  providerRef String? @unique
+  status PaymentStatus @default(PENDING)
+  amount Decimal @db.Decimal(18, 2)
+  createdAt DateTime @default(now())
+  dealId String
+  deal EscrowDeal @relation(fields: [dealId], references: [id])
+  events PaymentEvent[]
+}
+model PaymentEvent { id String @id @default(cuid()); eventType String; payload Json; createdAt DateTime @default(now()); paymentId String; payment Payment @relation(fields:[paymentId],references:[id]) }
+model Message { id String @id @default(cuid()); body String; createdAt DateTime @default(now()); readAt DateTime?; senderId String; sender User @relation(fields:[senderId],references:[id]); dealId String; deal EscrowDeal @relation(fields:[dealId],references:[id]); @@index([dealId,createdAt]) }
+model Dispute { id String @id @default(cuid()); reason String; description String; status DisputeStatus @default(OPEN); createdAt DateTime @default(now()); dealId String @unique; deal EscrowDeal @relation(fields:[dealId],references:[id]); evidence DisputeEvidence[] }
+model DisputeEvidence { id String @id @default(cuid()); url String; createdAt DateTime @default(now()); disputeId String; dispute Dispute @relation(fields:[disputeId],references:[id],onDelete:Cascade) }
+model Notification { id String @id @default(cuid()); type String; body String; readAt DateTime?; createdAt DateTime @default(now()); userId String; user User @relation(fields:[userId],references:[id]); @@index([userId,createdAt]) }
+model Rating { id String @id @default(cuid()); score Int; comment String?; createdAt DateTime @default(now()); userId String; user User @relation(fields:[userId],references:[id]) }
+model AuditLog { id String @id @default(cuid()); actorId String?; action String; entityType String; entityId String; metadata Json?; createdAt DateTime @default(now()); @@index([entityType,entityId]) }

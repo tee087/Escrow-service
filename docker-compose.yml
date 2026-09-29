@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clservice
+      POSTGRES_PASSWORD: clservice
+      POSTGRES_DB: clservice
+    ports: ["5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+  backend:
+    build: ./backend
+    env_file: .env
+    depends_on: [postgres]
+    ports: ["3000:3000"]
+  frontend:
+    build: ./frontend
+    ports: ["5173:80"]
+volumes:
+  postgres-data:

@@ -1,0 +1,7 @@
+{
+  "name": "cl-service",
+  "private": true,
+  "workspaces": ["backend", "frontend", "bot", "shared"],
+  "scripts": {"dev": "concurrently \"npm run dev -w backend\" \"npm run dev -w frontend\"", "build": "npm run build -ws", "test": "npm run test -ws", "db:generate": "prisma generate --schema database/schema.prisma", "db:migrate": "prisma migrate dev --schema database/schema.prisma"},
+  "devDependencies": {"concurrently": "^9.1.2", "prisma": "^6.5.0", "typescript": "^5.8.3"}
+}

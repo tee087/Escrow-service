@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: cl-service-api
+    runtime: node
+    rootDir: backend
+    buildCommand: cd .. && npm install && npm run db:generate && npm run build -w @cl-service/backend
+    startCommand: node dist/server.js
+    healthCheckPath: /api/listings
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: MINI_APP_URL
+        sync: false

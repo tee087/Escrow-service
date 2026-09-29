@@ -1,0 +1,1 @@
+{"buildCommand":"npm run build -w @cl-service/frontend","outputDirectory":"frontend/dist","framework":"vite","rewrites":[{"source":"/(.*)","destination":"/index.html"}]}

@@ -1,0 +1,1 @@
+{"name":"@cl-service/shared","version":"1.0.0","private":true,"main":"src/index.ts","types":"src/index.ts","scripts":{"build":"tsc -p tsconfig.json","test":"vitest run"},"devDependencies":{"typescript":"^5.8.3","vitest":"^3.1.2"}}

@@ -1,0 +1,3 @@
+-- Create the initial migration from the Prisma schema:
+-- npm run db:migrate
+-- Prisma generates provider-specific DDL and records it in this directory.
