@@ -77,7 +77,25 @@ app.post('/api/auth/register', async (request, reply) => {
   const sessionToken = await createSession(user.id, reply);
   return { recoveryCodes: codes, sessionToken };
 });
-app.post('/api/auth/login', async (request, reply) => { const data = z.object({ nickname: z.string(), password: z.string() }).parse(request.body); const user = await db.user.findUnique({ where: { nickname: data.nickname } }); if (!user || !(await argon2.verify(user.passwordHash, data.password))) return reply.code(401).send({ error: 'Nickname or password is incorrect.' }); const sessionToken = await createSession(user.id, reply); return { ok: true, sessionToken }; });
+app.post('/api/auth/login', async (request, reply) => {
+  const data = z.object({ nickname: z.string(), password: z.string(), initData: z.string().optional() }).parse(request.body);
+  const user = await db.user.findUnique({ where: { nickname: data.nickname } });
+  if (!user || !(await argon2.verify(user.passwordHash, data.password))) return reply.code(401).send({ error: 'Nickname or password is incorrect.' });
+  const rawTelegramUser = data.initData ? verifyInitData(data.initData) : null;
+  if (data.initData && !rawTelegramUser) return reply.code(401).send({ error: 'Telegram account verification failed. Reopen the Mini App from the official bot and try again.' });
+  if (rawTelegramUser) {
+    const telegram = z.object({ id: z.number(), username: z.string().optional(), photo_url: z.string().url().optional() }).parse(JSON.parse(rawTelegramUser));
+    const linked = await db.telegramAccount.findUnique({ where: { telegramId: BigInt(telegram.id) } });
+    if (linked && linked.userId !== user.id) return reply.code(409).send({ error: 'This Telegram account is already linked to another CL-Service account.' });
+    const isAdmin = Boolean(process.env.ADMIN_TELEGRAM_ID && BigInt(process.env.ADMIN_TELEGRAM_ID) === BigInt(telegram.id));
+    await db.$transaction([
+      linked ? db.telegramAccount.update({ where: { id: linked.id }, data: { username: telegram.username, photoUrl: telegram.photo_url } }) : db.telegramAccount.create({ data: { telegramId: BigInt(telegram.id), username: telegram.username, photoUrl: telegram.photo_url, userId: user.id } }),
+      ...(isAdmin ? [db.user.update({ where: { id: user.id }, data: { role: 'SUPER_ADMIN' } })] : [])
+    ]);
+  }
+  const sessionToken = await createSession(user.id, reply);
+  return { ok: true, sessionToken };
+});
 app.post('/api/auth/telegram', async (request, reply) => { const { initData } = z.object({ initData: z.string() }).parse(request.body); const rawUser = verifyInitData(initData); if (!rawUser) return reply.code(401).send({ error: 'Invalid Telegram authentication data.' }); const telegram = z.object({ id: z.number(), username: z.string().optional(), photo_url: z.string().url().optional() }).parse(JSON.parse(rawUser)); const linked = await db.telegramAccount.findUnique({ where: { telegramId: BigInt(telegram.id) }, include: { user: true } }); if (!linked) return reply.code(404).send({ error: 'No CL-Service account is linked to this Telegram account.' }); const isAdmin = Boolean(process.env.ADMIN_TELEGRAM_ID && BigInt(process.env.ADMIN_TELEGRAM_ID) === BigInt(telegram.id)); await db.$transaction([db.telegramAccount.update({ where: { id: linked.id }, data: { username: telegram.username, photoUrl: telegram.photo_url } }), ...(isAdmin ? [db.user.update({ where: { id: linked.user.id }, data: { role: 'SUPER_ADMIN' } })] : [])]); const sessionToken = await createSession(linked.user.id, reply); return { ok: true, sessionToken }; });
 app.post('/api/auth/logout', { preHandler: authenticate }, async (request, reply) => { const token = request.cookies.session!; await db.session.deleteMany({ where: { tokenHash: hashToken(token) } }); reply.clearCookie('session', { path: '/' }); return { ok: true }; });
 app.post('/api/auth/recovery', async (request, reply) => { const data = z.object({ nickname: z.string(), code: z.string(), password: z.string().min(10) }).parse(request.body); const user = await db.user.findUnique({ where: { nickname: data.nickname }, include: { recoveryCodes: { where: { usedAt: null } } } }); const record = user && (await Promise.all(user.recoveryCodes.map(async item => await argon2.verify(item.codeHash, data.code) ? item : null))).find(Boolean); if (!user || !record) return reply.code(401).send({ error: 'Invalid recovery details.' }); await db.$transaction([db.user.update({ where: { id: user.id }, data: { passwordHash: await argon2.hash(data.password, { type: argon2.argon2id }) } }), db.recoveryCode.update({ where: { id: record.id }, data: { usedAt: new Date() } }), db.session.deleteMany({ where: { userId: user.id } })]); return { ok: true }; });

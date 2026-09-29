@@ -45,7 +45,7 @@ function LoadingButton({ children, loading, ...props }: React.ButtonHTMLAttribut
 }
 
 function Auth({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
-  const [mode, setMode] = useState<'register' | 'login'>('register');
+  const [mode, setMode] = useState<'register' | 'login'>(() => telegramInitData() ? 'login' : 'register');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
@@ -80,7 +80,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
     try {
       setLoading(true);
       if (mode === 'login') {
-        await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ nickname: form.get('nickname'), password: form.get('password') }) });
+        await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ nickname: form.get('nickname'), password: form.get('password'), initData: telegramInitData() || undefined }) });
         await onAuthenticated();
         return;
       }
