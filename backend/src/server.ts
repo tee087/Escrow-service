@@ -94,7 +94,53 @@ app.patch('/api/profile', { preHandler: authenticate }, async request => {
 app.get('/api/listings', async request => { const query = z.object({ q: z.string().optional(), category: z.string().optional() }).parse(request.query); return db.listing.findMany({ where: { active: true, ...(query.category ? { category: { name: query.category } } : {}), ...(query.q ? { OR: [{ title: { contains: query.q, mode: 'insensitive' } }, { description: { contains: query.q, mode: 'insensitive' } }] } : {}) }, include: { seller: { select: { nickname: true } }, category: true }, orderBy: { createdAt: 'desc' } }); });
 app.post('/api/listings', { preHandler: authenticate }, async request => { const data = z.object({ title:z.string().min(3), description:z.string().min(10), category:z.string().min(2), price:z.coerce.number().positive(), currency:z.string().length(3), deliveryInfo:z.string().min(3), terms:z.string().min(3) }).parse(request.body); const category = await db.category.upsert({ where: { name: data.category }, create: { name: data.category }, update: {} }); const { category: _category, ...listing } = data; return db.listing.create({ data: { ...listing, sellerId: (request as AuthRequest).user.id, categoryId: category.id } }); });
 app.post('/api/deals', { preHandler: authenticate }, async (request, reply) => { const data = z.object({ sellerId:z.string(), item:z.string().min(3), amount:z.coerce.number().positive(), currency:z.string().length(3), terms:z.string().min(3), deadline:z.string().datetime() }).parse(request.body); const buyer=await db.user.findUniqueOrThrow({where:{id:(request as AuthRequest).user.id},select:{marketplaceRole:true}}); const seller=await db.user.findUnique({where:{id:data.sellerId},select:{marketplaceRole:true}}); if(buyer.marketplaceRole!=='BUYER') return reply.code(403).send({error:'Switch your marketplace role to Buyer before opening an escrow request.'}); if(!seller||seller.marketplaceRole!=='SELLER') return reply.code(400).send({error:'The selected member is not registered as a seller.'}); if (data.sellerId === (request as AuthRequest).user.id) return reply.code(400).send({ error: 'You cannot create a deal with yourself.' }); const deal = await db.escrowDeal.create({ data: { ...data, buyerId: (request as AuthRequest).user.id, deadline: new Date(data.deadline) } }); await db.notification.create({ data: { userId: data.sellerId, type:'ESCROW_ROOM_REQUESTED', body:`A buyer requested a private escrow room for deal ${deal.id}.` } }); return deal; });
+app.post('/api/private-deals', { preHandler: authenticate }, async (request, reply) => {
+  const data = z.object({ role: z.enum(['BUYER', 'SELLER']), description: z.string().trim().min(10, 'Describe the deal in at least 10 characters.').max(2000), amount: z.coerce.number().min(0).default(0), currency: z.string().trim().length(3).default('USD') }).parse(request.body);
+  const userId = (request as AuthRequest).user.id;
+  const deal = await db.$transaction(async tx => {
+    await tx.user.update({ where: { id: userId }, data: { marketplaceRole: data.role } });
+    return tx.escrowDeal.create({ data: {
+      item: 'Private escrow room', terms: data.description, amount: data.amount, currency: data.currency.toUpperCase(),
+      deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      ...(data.role === 'BUYER' ? { buyerId: userId } : { sellerId: userId })
+    }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } });
+  });
+  return deal;
+});
+app.post('/api/deals/:id/invite-counterpart', { preHandler: authenticate }, async (request, reply) => {
+  const dealId = z.object({ id: z.string() }).parse(request.params).id;
+  const data = z.object({ nickname: z.string().trim().min(3).max(32) }).parse(request.body);
+  const deal = await db.escrowDeal.findUnique({ where: { id: dealId } });
+  const userId = (request as AuthRequest).user.id;
+  if (!deal || (deal.buyerId !== userId && deal.sellerId !== userId)) return reply.code(403).send({ error: 'Only the room creator can invite the other participant.' });
+  const creatorIsBuyer = deal.buyerId === userId;
+  const counterpart = await db.user.findUnique({ where: { nickname: data.nickname }, select: { id: true, marketplaceRole: true } });
+  const requiredRole = creatorIsBuyer ? 'SELLER' : 'BUYER';
+  if (!counterpart || counterpart.marketplaceRole !== requiredRole) return reply.code(400).send({ error: `No ${requiredRole.toLowerCase()} is registered with that CL-Service username.` });
+  if (counterpart.id === userId) return reply.code(400).send({ error: 'You cannot invite yourself.' });
+  if ((creatorIsBuyer && deal.sellerId) || (!creatorIsBuyer && deal.buyerId)) return reply.code(409).send({ error: 'The other participant has already been invited.' });
+  const updated = await db.escrowDeal.update({ where: { id: dealId }, data: creatorIsBuyer ? { sellerId: counterpart.id } : { buyerId: counterpart.id }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } });
+  await db.notification.create({ data: { userId: counterpart.id, type: 'PRIVATE_ROOM_INVITATION', body: `You were invited to a private escrow room by ${creatorIsBuyer ? 'a buyer' : 'a seller'}.` } });
+  return updated;
+});
+app.post('/api/deals/:id/invite-admin', { preHandler: authenticate }, async (request, reply) => {
+  const dealId = z.object({ id: z.string() }).parse(request.params).id;
+  const userId = (request as AuthRequest).user.id;
+  const deal = await db.escrowDeal.findUnique({ where: { id: dealId }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } });
+  if (!deal || (deal.buyerId !== userId && deal.sellerId !== userId)) return reply.code(403).send({ error: 'Only a room participant can invite the administrator.' });
+  const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
+  if (!adminTelegramId || !process.env.BOT_TOKEN || !process.env.MINI_APP_URL) return reply.code(503).send({ error: 'The official administrator notification is not configured yet.' });
+  const creator = deal.buyerId === userId ? deal.buyer : deal.seller;
+  const creatorRole = deal.buyerId === userId ? 'buyer' : 'seller';
+  const roomUrl = `${process.env.MINI_APP_URL}?deal=${encodeURIComponent(deal.id)}`;
+  const text = `\u{1F6E1}\u{FE0F} <b>Private deal room invitation</b>\n\n<b>${creator?.nickname || 'A member'}</b> opened a deal room as the ${creatorRole} and wants you to join.\n\n<b>Description</b>\n${deal.terms}\n\nOnly you, the buyer, and the seller can access this room.`;
+  const telegramResponse = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: adminTelegramId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '\u{1F6E1}\u{FE0F} Join Deal Room', web_app: { url: roomUrl } }]] } }) });
+  if (!telegramResponse.ok) return reply.code(502).send({ error: 'The administrator could not be notified. Ask the administrator to start the bot first.' });
+  await db.auditLog.create({ data: { actorId: userId, action: 'ADMIN_INVITED_TO_DEAL_ROOM', entityType: 'EscrowDeal', entityId: deal.id } });
+  return { ok: true };
+});
 app.get('/api/deals', { preHandler: authenticate }, async request => { const user=(request as AuthRequest).user; return db.escrowDeal.findMany({ where: user.role==='SUPER_ADMIN'?{}:{ OR: [{ buyerId:user.id }, { sellerId:user.id }] }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } }, orderBy: { createdAt: 'desc' } }); });
+/*
 async function transition(request: FastifyRequest, reply: any, target: DealStatus, actor: 'buyer'|'seller') { const params = z.object({ id:z.string() }).parse(request.params); const user = (request as AuthRequest).user; const deal = await db.escrowDeal.findUnique({ where:{id:params.id} }); if (!deal || deal[`${actor}Id`] !== user.id) return reply.code(403).send({ error:'You are not authorized for this action.' }); const allowed: Record<DealStatus, DealStatus[]> = { PENDING:['ACCEPTED','CANCELLED'], ACCEPTED:['FUNDED'], FUNDED:['IN_PROGRESS','DISPUTED'], IN_PROGRESS:['DELIVERED','DISPUTED'], DELIVERED:['COMPLETED','DISPUTED'], COMPLETED:[], DISPUTED:['REFUNDED','COMPLETED'], CANCELLED:[], REFUNDED:[] }; if (!allowed[deal.status].includes(target)) return reply.code(409).send({ error:'This action is unavailable for the current deal status.' }); return db.$transaction(async tx => { const updated = await tx.escrowDeal.update({ where:{id:deal.id}, data:{status:target} }); await tx.auditLog.create({ data:{ actorId:user.id, action:`DEAL_${target}`, entityType:'EscrowDeal', entityId:deal.id } }); await tx.notification.create({ data:{ userId: actor === 'buyer' ? deal.sellerId : deal.buyerId, type:'DEAL_UPDATED', body:`Deal ${deal.id} is now ${target.toLowerCase().replace('_',' ')}.` } }); return updated; }); }
 app.post('/api/deals/:id/accept', { preHandler: authenticate }, (request,reply) => transition(request,reply,'ACCEPTED','seller'));
 app.post('/api/deals/:id/fund', { preHandler: authenticate }, async (_request, reply) => reply.code(503).send({ error: 'Payment provider is not configured.' }));
@@ -102,6 +148,31 @@ app.post('/api/deals/:id/deliver', { preHandler: authenticate }, (request,reply)
 app.post('/api/deals/:id/confirm', { preHandler: authenticate }, (request,reply) => transition(request,reply,'COMPLETED','buyer'));
 app.post('/api/admin/deals/:id/release', { preHandler: authenticate }, async (request, reply) => { const user=(request as AuthRequest).user; if(user.role!=='SUPER_ADMIN') return reply.code(403).send({error:'Only the official escrow administrator can release funds.'}); const id=z.object({id:z.string()}).parse(request.params).id; const deal=await db.escrowDeal.findUnique({where:{id}}); if(!deal) return reply.code(404).send({error:'Deal not found.'}); if(!['DELIVERED','DISPUTED'].includes(deal.status)) return reply.code(409).send({error:'Funds can only be released after delivery or a dispute decision.'}); return db.$transaction(async tx=>{const updated=await tx.escrowDeal.update({where:{id},data:{status:'COMPLETED'}});await tx.auditLog.create({data:{actorId:user.id,action:'ADMIN_ESCROW_RELEASE',entityType:'EscrowDeal',entityId:id}});await tx.notification.createMany({data:[{userId:deal.buyerId,type:'ESCROW_RELEASED',body:`The official escrow administrator released deal ${id}.`},{userId:deal.sellerId,type:'ESCROW_RELEASED',body:`The official escrow administrator released deal ${id}.`} ]});return updated;}); });
 app.post('/api/deals/:id/dispute', { preHandler: authenticate }, async (request, reply) => { const data=z.object({reason:z.string().min(3),description:z.string().min(10)}).parse(request.body); const deal=await transition(request,reply,'DISPUTED','buyer'); if (!deal || 'error' in deal) return deal; return db.dispute.create({data:{...data,dealId:deal.id}}); });
+*/
+async function transition(request: FastifyRequest, reply: any, target: DealStatus, actor: 'buyer' | 'seller') {
+  const id = z.object({ id: z.string() }).parse(request.params).id;
+  const user = (request as AuthRequest).user;
+  const deal = await db.escrowDeal.findUnique({ where: { id } });
+  const actorId = actor === 'buyer' ? deal?.buyerId : deal?.sellerId;
+  const recipientId = actor === 'buyer' ? deal?.sellerId : deal?.buyerId;
+  if (!deal || actorId !== user.id || !recipientId) return reply.code(403).send({ error: 'You are not authorized for this action.' });
+  const allowed: Record<DealStatus, DealStatus[]> = { PENDING: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['FUNDED'], FUNDED: ['IN_PROGRESS', 'DISPUTED'], IN_PROGRESS: ['DELIVERED', 'DISPUTED'], DELIVERED: ['COMPLETED', 'DISPUTED'], COMPLETED: [], DISPUTED: ['REFUNDED', 'COMPLETED'], CANCELLED: [], REFUNDED: [] };
+  if (!allowed[deal.status].includes(target)) return reply.code(409).send({ error: 'This action is unavailable for the current deal status.' });
+  return db.$transaction(async tx => { const updated = await tx.escrowDeal.update({ where: { id }, data: { status: target } }); await tx.notification.create({ data: { userId: recipientId, type: 'DEAL_UPDATED', body: `Deal ${id} is now ${target.toLowerCase().replace('_', ' ')}.` } }); return updated; });
+}
+app.post('/api/deals/:id/accept', { preHandler: authenticate }, (request, reply) => transition(request, reply, 'ACCEPTED', 'seller'));
+app.post('/api/deals/:id/fund', { preHandler: authenticate }, async (_request, reply) => reply.code(503).send({ error: 'Payment provider is not configured.' }));
+app.post('/api/deals/:id/deliver', { preHandler: authenticate }, (request, reply) => transition(request, reply, 'DELIVERED', 'seller'));
+app.post('/api/deals/:id/confirm', { preHandler: authenticate }, (request, reply) => transition(request, reply, 'COMPLETED', 'buyer'));
+app.post('/api/admin/deals/:id/release', { preHandler: authenticate }, async (request, reply) => {
+  if ((request as AuthRequest).user.role !== 'SUPER_ADMIN') return reply.code(403).send({ error: 'Only the official escrow administrator can release funds.' });
+  const id = z.object({ id: z.string() }).parse(request.params).id;
+  const deal = await db.escrowDeal.findUnique({ where: { id } });
+  if (!deal || !deal.buyerId || !deal.sellerId) return reply.code(409).send({ error: 'Both buyer and seller must join before funds can be released.' });
+  if (!['DELIVERED', 'DISPUTED'].includes(deal.status)) return reply.code(409).send({ error: 'Funds can only be released after delivery or a dispute decision.' });
+  return db.$transaction(async tx => { const updated = await tx.escrowDeal.update({ where: { id }, data: { status: 'COMPLETED' } }); await tx.notification.createMany({ data: [{ userId: deal.buyerId!, type: 'ESCROW_RELEASED', body: `The official escrow administrator released deal ${id}.` }, { userId: deal.sellerId!, type: 'ESCROW_RELEASED', body: `The official escrow administrator released deal ${id}.` }] }); return updated; });
+});
+app.post('/api/deals/:id/dispute', { preHandler: authenticate }, async (request, reply) => { const data = z.object({ reason: z.string().min(3), description: z.string().min(10) }).parse(request.body); const deal = await transition(request, reply, 'DISPUTED', 'buyer'); if (!deal || 'error' in deal) return deal; return db.dispute.create({ data: { ...data, dealId: deal.id } }); });
 app.get('/api/deals/:id/messages', { preHandler: authenticate }, async (request, reply) => { const dealId=z.object({id:z.string()}).parse(request.params).id; const deal=await db.escrowDeal.findUnique({where:{id:dealId}}); const user=(request as AuthRequest).user; if(!deal||(user.id!==deal.buyerId&&user.id!==deal.sellerId&&user.role!=='SUPER_ADMIN')) return reply.code(403).send({error:'This private room is available only to the buyer, seller, and official escrow administrator.'}); return db.message.findMany({where:{dealId},include:{sender:{select:{nickname:true,role:true}}},orderBy:{createdAt:'asc'}}); });
 app.post('/api/deals/:id/messages', { preHandler: authenticate, config:{rateLimit:{max:15,timeWindow:'1 minute'}} }, async (request, reply) => { const body=z.object({message:z.string().min(1).max(2000)}).parse(request.body); const dealId=z.object({id:z.string()}).parse(request.params).id; const deal=await db.escrowDeal.findUniqueOrThrow({where:{id:dealId}}); const user=(request as AuthRequest).user; if (user.id!==deal.buyerId&&user.id!==deal.sellerId&&user.role!=='SUPER_ADMIN') return reply.code(403).send({ error: 'This private room is available only to the buyer, seller, and official escrow administrator.' }); return db.message.create({data:{dealId,senderId:user.id,body:body.message}}); });
 app.get('/api/community/messages', { preHandler: authenticate }, async () => db.communityMessage.findMany({ take: 100, orderBy: { createdAt: 'asc' }, include: { sender: { select: { nickname: true } } } }));

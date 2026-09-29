@@ -113,10 +113,10 @@ model EscrowDeal {
   terms String
   deadline DateTime
   createdAt DateTime @default(now())
-  buyerId String
-  sellerId String
-  buyer User @relation("Buyer", fields: [buyerId], references: [id])
-  seller User @relation("Seller", fields: [sellerId], references: [id])
+  buyerId String?
+  sellerId String?
+  buyer User? @relation("Buyer", fields: [buyerId], references: [id])
+  seller User? @relation("Seller", fields: [sellerId], references: [id])
   payments Payment[]
   messages Message[]
   dispute Dispute?
