@@ -7,10 +7,12 @@ import './navigation.css';
 import './community-chat.css';
 import './telegram-profile.css';
 import './private-deals.css';
+import './official-catalog.css';
 import { CommunityChat, NavigationDashboard } from './navigation-dashboard';
 import { PublicChat } from './public-chat';
 import { TelegramProfile } from './telegram-profile';
 import { PrivateDeals } from './private-deals';
+import { OfficialCatalog } from './official-catalog';
 
 const apiUrl = import.meta.env.VITE_API_URL || '';
 const telegramInitData = () => (window as any).Telegram?.WebApp?.initData || '';
@@ -122,6 +124,7 @@ function App() {
   useEffect(() => { const initData = telegramInitData(); if (initData) { api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData }) }).then(loadProfile).catch(() => loadProfile().catch(() => undefined)); } else { loadProfile().catch(() => undefined); } api('/api/listings').then(setListings).catch(reason => setError(reason.message)); }, []);
   if (!profile) return <Auth onAuthenticated={loadProfile} />;
   if (view === 'Deals') return <PrivateDeals api={api} profile={profile} onBack={() => setView('Home')} />;
+  if (view === 'Catalog') return <OfficialCatalog onNavigate={setView} />;
   if (view === 'Chat') return <main className="dashboard coming-soon"><section><span>✦</span><h1>Community chat</h1><p>We are preparing a safer, brighter community experience.</p><b>Coming soon</b><button onClick={() => setView('Home')}>Back to home</button></section></main>;
   if (view === 'Profile') return <TelegramProfile profile={profile} onNavigate={setView} onLogout={async () => { await api('/api/auth/logout', { method: 'POST' }); setProfile(null); }} />;
   return <><NavigationDashboard profile={profile} listings={listings} view={view} setView={setView} api={api} logout={async () => { await api('/api/auth/logout', { method: 'POST' }); setProfile(null); }} />{error && <p className="error global-error">{error}</p>}</>;

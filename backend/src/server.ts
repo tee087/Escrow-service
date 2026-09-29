@@ -69,7 +69,8 @@ app.post('/api/auth/register', async (request, reply) => {
   const codes = recoveryCodes();
   const rawTelegramUser = body.initData ? verifyInitData(body.initData) : null;
   const telegram = rawTelegramUser ? z.object({ id: z.number(), username: z.string().optional(), photo_url: z.string().url().optional() }).parse(JSON.parse(rawTelegramUser)) : null;
-  if (telegram && await db.telegramAccount.findUnique({ where: { telegramId: BigInt(telegram.id) }, select: { id: true } })) return reply.code(409).send({ error: 'This Telegram account is already linked to CL-Service.' });
+  if (!telegram) return reply.code(401).send({ error: 'Open CL-Service from the official Telegram bot to register securely.' });
+  if (await db.telegramAccount.findUnique({ where: { telegramId: BigInt(telegram.id) }, select: { id: true } })) return reply.code(409).send({ error: 'This Telegram account is already registered. Return to the bot and tap Open Escrow.' });
   const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
   const isAdmin = Boolean(telegram && adminTelegramId && BigInt(adminTelegramId) === BigInt(telegram.id));
   const user = await db.user.create({ data: { nickname: data.nickname, marketplaceRole: data.marketplaceRole, role: isAdmin ? 'SUPER_ADMIN' : 'USER', passwordHash: await argon2.hash(data.password, { type: argon2.argon2id }), pinHash: await argon2.hash(data.pin), ...(telegram ? { telegram: { create: { telegramId: BigInt(telegram.id), username: telegram.username, photoUrl: telegram.photo_url } } } : {}), recoveryCodes: { create: await Promise.all(codes.map(async code => ({ codeHash: await argon2.hash(code, { type: argon2.argon2id }) }))) } } });
