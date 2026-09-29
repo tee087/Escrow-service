@@ -14,6 +14,7 @@ import { PublicChat } from './public-chat';
 import { TelegramProfile } from './telegram-profile';
 import { PrivateDeals } from './private-deals';
 import { DealRoomHub } from './deal-room-hub';
+import { AdminDealHub } from './admin-deal-hub';
 import { OfficialCatalog } from './official-catalog';
 
 const apiUrl = import.meta.env.VITE_API_URL || '';
@@ -134,7 +135,7 @@ function App() {
   const loadProfile = async () => { const result = await api('/api/profile'); setProfile(result); };
   useEffect(() => { (window as any).Telegram?.WebApp?.ready(); const initData = telegramInitData(); if (initData) { api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData }) }).then(loadProfile).catch(() => loadProfile().catch(() => undefined)); } else { loadProfile().catch(() => undefined); } api('/api/listings').then(setListings).catch(reason => setError(reason.message)); }, []);
   if (!profile) return <Auth onAuthenticated={loadProfile} />;
-  if (view === 'Deals') return <DealRoomHub api={api} profile={profile} onBack={() => setView('Home')} />;
+  if (view === 'Deals') return profile.role === 'SUPER_ADMIN' ? <AdminDealHub api={api} profile={profile} onBack={() => setView('Home')} /> : <DealRoomHub api={api} profile={profile} onBack={() => setView('Home')} />;
   if (view === 'Catalog') return <OfficialCatalog onNavigate={setView} />;
   if (view === 'Chat') return <main className="dashboard coming-soon"><section><span>✦</span><h1>Community chat</h1><p>We are preparing a safer, brighter community experience.</p><b>Coming soon</b><button onClick={() => setView('Home')}>Back to home</button></section></main>;
   if (view === 'Profile') return <TelegramProfile profile={profile} onNavigate={setView} onLogout={async () => { await api('/api/auth/logout', { method: 'POST' }); setProfile(null); }} />;

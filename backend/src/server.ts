@@ -126,6 +126,34 @@ app.post('/api/private-deals', { preHandler: authenticate }, async (request, rep
   });
   return deal;
 });
+app.post('/api/admin/private-deals', { preHandler: authenticate }, async (request, reply) => {
+  if ((request as AuthRequest).user.role !== 'SUPER_ADMIN') return reply.code(403).send({ error: 'Only the official administrator can create an administrator-led room.' });
+  const data = z.object({ description: z.string().trim().min(10).max(2000), amount: z.coerce.number().min(0).default(0), currency: z.string().trim().min(3).max(10).default('USD') }).parse(request.body);
+  return db.escrowDeal.create({ data: { item: 'Administrator-led escrow room', terms: data.description, amount: data.amount, currency: data.currency.toUpperCase(), deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } });
+});
+app.post('/api/admin/deals/:id/invite', { preHandler: authenticate }, async (request, reply) => {
+  if ((request as AuthRequest).user.role !== 'SUPER_ADMIN') return reply.code(403).send({ error: 'Only the official administrator can invite buyers and sellers.' });
+  const id = z.object({ id: z.string() }).parse(request.params).id;
+  const data = z.object({ nickname: z.string().trim().min(3).max(32), role: z.enum(['BUYER', 'SELLER']) }).parse(request.body);
+  const [deal, member] = await Promise.all([db.escrowDeal.findUnique({ where: { id } }), db.user.findUnique({ where: { nickname: data.nickname } })]);
+  if (!deal) return reply.code(404).send({ error: 'This deal room no longer exists.' });
+  if (!member) return reply.code(404).send({ error: 'No CL-Service account was found with that username.' });
+  if (member.role === 'SUPER_ADMIN') return reply.code(400).send({ error: 'The official administrator cannot be invited as a buyer or seller.' });
+  if ((data.role === 'BUYER' && deal.buyerId) || (data.role === 'SELLER' && deal.sellerId)) return reply.code(409).send({ error: `This room already has a ${data.role.toLowerCase()}.` });
+  const updated = await db.$transaction(async tx => { await tx.user.update({ where: { id: member.id }, data: { marketplaceRole: data.role } }); return tx.escrowDeal.update({ where: { id }, data: data.role === 'BUYER' ? { buyerId: member.id } : { sellerId: member.id }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } }); });
+  await db.notification.create({ data: { userId: member.id, type: 'PRIVATE_ROOM_INVITATION', body: `The official administrator invited you as the ${data.role.toLowerCase()} in a private escrow room.` } });
+  return updated;
+});
+app.post('/api/deals/:id/request-admin', { preHandler: authenticate }, async (request, reply) => {
+  const id = z.object({ id: z.string() }).parse(request.params).id;
+  const user = (request as AuthRequest).user;
+  const deal = await db.escrowDeal.findUnique({ where: { id }, include: { buyer: { select: { nickname: true } }, seller: { select: { nickname: true } } } });
+  if (!deal || (deal.buyerId !== user.id && deal.sellerId !== user.id)) return reply.code(403).send({ error: 'Only a room participant can invite the administrator.' });
+  if (!process.env.ADMIN_TELEGRAM_ID || !process.env.BOT_TOKEN || !process.env.MINI_APP_URL) return reply.code(503).send({ error: 'Administrator notifications are not configured. Check Render environment variables.' });
+  const creator = deal.buyerId === user.id ? deal.buyer?.nickname : deal.seller?.nickname;
+  try { const telegramResponse = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: process.env.ADMIN_TELEGRAM_ID, text: `Private deal room request\n\n${creator || 'A member'} opened a room and wants you to join.\n\nDescription:\n${deal.terms}\n\nOpen the Mini App to join this room.`, reply_markup: { inline_keyboard: [[{ text: 'Open deal room', web_app: { url: `${process.env.MINI_APP_URL}?deal=${encodeURIComponent(id)}` } }]] } }) }); if (!telegramResponse.ok) return reply.code(502).send({ error: 'Telegram could not notify the administrator. The administrator must open the bot and send /start first.' }); } catch (error) { request.log.error(error); return reply.code(502).send({ error: 'Could not contact Telegram. Please try inviting the administrator again.' }); }
+  return { ok: true };
+});
 app.post('/api/deals/:id/invite-counterpart', { preHandler: authenticate }, async (request, reply) => {
   const dealId = z.object({ id: z.string() }).parse(request.params).id;
   const data = z.object({ nickname: z.string().trim().min(3).max(32) }).parse(request.body);
