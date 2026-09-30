@@ -129,11 +129,13 @@ function Dashboard({ profile, listings, view, setView, logout }: { profile: any;
 
 function App() {
   const [profile, setProfile] = useState<any>(null);
+  const [authenticatingTelegram, setAuthenticatingTelegram] = useState(Boolean(telegramInitData()));
   const [listings, setListings] = useState<any[]>([]);
   const [view, setView] = useState('Home');
   const [error, setError] = useState('');
   const loadProfile = async () => { const result = await api('/api/profile'); setProfile(result); };
-  useEffect(() => { (window as any).Telegram?.WebApp?.ready(); const initData = telegramInitData(); if (initData) { api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData }) }).then(loadProfile).catch(() => loadProfile().catch(() => undefined)); } else { loadProfile().catch(() => undefined); } api('/api/listings').then(setListings).catch(reason => setError(reason.message)); }, []);
+  useEffect(() => { (window as any).Telegram?.WebApp?.ready(); const initData = telegramInitData(); const finish = () => setAuthenticatingTelegram(false); if (initData) { api('/api/auth/telegram', { method: 'POST', body: JSON.stringify({ initData }) }).then(loadProfile).catch(() => loadProfile().catch(() => undefined)).finally(finish); } else { loadProfile().catch(() => undefined).finally(finish); } api('/api/listings').then(setListings).catch(reason => setError(reason.message)); }, []);
+  if (!profile && authenticatingTelegram) return <main className="auth telegram-login"><section><span className="spinner" aria-hidden="true" /><h1>Wait while we log you in</h1><p>Securely verifying your Telegram account…</p></section></main>;
   if (!profile) return <Auth onAuthenticated={loadProfile} />;
   if (view === 'Deals') return profile.role === 'SUPER_ADMIN' ? <AdminDealHub api={api} profile={profile} onBack={() => setView('Home')} /> : <DealRoomHub api={api} profile={profile} onBack={() => setView('Home')} />;
   if (view === 'Catalog') return <OfficialCatalog onNavigate={setView} />;
