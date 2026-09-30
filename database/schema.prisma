@@ -149,6 +149,16 @@ model Message {
   sender User @relation(fields: [senderId], references: [id])
   dealId String
   deal EscrowDeal @relation(fields: [dealId], references: [id])
+  attachments MessageAttachment[]
+}
+model MessageAttachment {
+  id String @id @default(cuid())
+  url String
+  name String
+  mimeType String
+  createdAt DateTime @default(now())
+  messageId String
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 }
 model CommunityMessage {
   id String @id @default(cuid())
